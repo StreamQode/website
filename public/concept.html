@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Stream Qode · Experience concept</title>
+<!--
+  DEVICE-TESTABLE CONCEPT — served statically from Nuxt's public/ (URL: /concept.html).
+  Desktop (fine pointer): continuous horizontal video canvas with parallax, custom
+  cursor, preloader. Mobile/touch: full-screen vertical video feed (Reels-native).
+  One HLS stream is live at a time (virtualized); the source here is a public test
+  stream, treated cinematic — production swaps each product's Cloudflare .m3u8.
+  Not the real Nuxt build; a feel prototype to judge the direction on real devices.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"></script>
+<style>
+  :root { --ease: cubic-bezier(.22,1,.36,1); --ink: #f2ede4; --bg: #08070a; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+    font-family: "Inter", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  h1, h2 { font-family: "Playfair Display", serif; font-weight: 600; }
+
+  /* Preloader */
+  #pre { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: flex;
+    align-items: center; justify-content: center; flex-direction: column; gap: 20px;
+    transition: opacity .8s var(--ease), visibility .8s; }
+  #pre.done { opacity: 0; visibility: hidden; }
+  #pre .mark { font-size: 13px; letter-spacing: .3em; opacity: .8; }
+  #pre .num { font-family: "Playfair Display", serif; font-style: italic; font-size: 64px; }
+  #pre .line { width: 180px; height: 1px; background: #2a2830; position: relative; }
+  #pre .line i { position: absolute; inset: 0; width: 0; background: var(--ink); }
+
+  /* Cursor (desktop) */
+  #cur { position: fixed; top: 0; left: 0; width: 12px; height: 12px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,.7); z-index: 55; pointer-events: none;
+    transform: translate(-50%,-50%); transition: width .3s var(--ease), height .3s var(--ease), background .3s;
+    mix-blend-mode: difference; }
+  body.touch #cur { display: none; }
+  #cur.big { width: 74px; height: 74px; background: rgba(255,255,255,.08); }
+
+  .grain { position: fixed; inset: 0; z-index: 40; pointer-events: none; opacity: .045;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+  /* Shared media treatment */
+  .vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0;
+    transition: opacity 1s var(--ease); filter: saturate(.7) contrast(1.06) brightness(.62); }
+  .on .vid, .play .vid { opacity: 1; }
+  .poster { position: absolute; inset: 0; background-size: cover; background-position: center; }
+  .tint { position: absolute; inset: 0; mix-blend-mode: overlay; }
+  .vig { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.3), transparent 30%, transparent 55%, rgba(0,0,0,.72)); }
+  .live { position: absolute; top: 20px; left: 20px; font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 7px; opacity: 0; transition: .6s; color:#fff; }
+  .on .live, .play .live { opacity: .9; }
+  .live i { width: 6px; height: 6px; border-radius: 50%; background: #e8503a; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+
+  /* ---------- DESKTOP: horizontal canvas ---------- */
+  body.desktop { cursor: none; }
+  .stage { position: fixed; inset: 0; overflow: hidden; }
+  .wash { position: absolute; top: 0; left: 0; height: 100%; width: 300vw;
+    background: radial-gradient(60% 70% at 20% 30%, #3a2a0e, transparent 55%),
+      radial-gradient(50% 60% at 55% 75%, #2a0d16, transparent 55%),
+      radial-gradient(60% 70% at 88% 35%, #12283c, transparent 55%),
+      linear-gradient(100deg,#0b0906,#120a10 50%,#070a0d); opacity: .85; }
+  .ghost { position: absolute; top: 50%; white-space: nowrap; font-family: "Playfair Display", serif;
+    font-style: italic; font-size: 33vh; color: var(--ink); opacity: .045; transform: translateY(-50%); }
+  .card { position: absolute; top: 50%; border-radius: 16px; overflow: hidden; box-shadow: 0 50px 100px rgba(0,0,0,.55); }
+  .card .poster { inset: -6%; }
+  .card.play .poster { animation: drift 18s var(--ease) infinite alternate; }
+  @keyframes drift { from{transform:scale(1.05) translate(-2%,-1%)} to{transform:scale(1.15) translate(2%,2%)} }
+  .card .cap { position: absolute; left: 22px; right: 22px; bottom: 20px; color: #fff; }
+  .card .cap .k { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; opacity: .8; margin-bottom: 10px; }
+  .card .cap h2 { font-style: italic; font-size: 32px; line-height: .95; }
+  .card .cap p { margin-top: 8px; font-size: 12px; letter-spacing: .04em; opacity: .82; }
+
+  .hud { position: fixed; inset: 0; pointer-events: none; z-index: 45; mix-blend-mode: difference; color: #fff; }
+  .hud > * { position: absolute; }
+  .wm { top: 32px; left: 36px; font-size: 13px; letter-spacing: .2em; }
+  .clk { top: 32px; left: 168px; font-size: 12px; letter-spacing: .12em; opacity: .8; }
+  .nv { top: 32px; right: 36px; font-size: 12px; letter-spacing: .16em; }
+  .ix { bottom: 30px; left: 36px; font-family: "Playfair Display", serif; font-style: italic; font-size: 15px; }
+  .ht { bottom: 32px; right: 36px; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; opacity: .7; }
+  .bar { position: fixed; left: 0; bottom: 0; height: 2px; background: #c8a24a; width: 0; z-index: 46; }
+
+  /* ---------- MOBILE: vertical feed ---------- */
+  .feed { height: 100%; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none; }
+  .feed::-webkit-scrollbar { display: none; }
+  .slide { position: relative; height: 100%; scroll-snap-align: start; overflow: hidden; color: #fff; }
+  .slide .poster { inset: 0; }
+  .slide .info { position: absolute; left: 22px; right: 80px; bottom: 42px; }
+  .slide .info .k { font-size: 11px; letter-spacing: .2em; text-transform: uppercase; opacity: .85; margin-bottom: 12px; }
+  .slide .info h2 { font-style: italic; font-size: 42px; line-height: .95; }
+  .slide .info p { margin-top: 12px; font-size: 13px; opacity: .85; }
+  .slide .info .cta { margin-top: 18px; display: inline-block; padding: 12px 22px; border: 1px solid #fff;
+    border-radius: 30px; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; }
+  .rail { position: absolute; right: 16px; bottom: 46px; display: flex; flex-direction: column; gap: 20px; align-items: center; }
+  .rail div { font-size: 10px; opacity: .9; text-align: center; }
+  .rail .ic { width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.14);
+    backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 4px; }
+  .mtop { position: absolute; top: 20px; left: 22px; right: 22px; display: flex; justify-content: space-between;
+    font-size: 11px; letter-spacing: .16em; text-transform: uppercase; z-index: 3; }
+  .mdots { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 7px; z-index: 3; }
+  .mdots span { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.35); }
+  .mdots span.on { background: #fff; height: 15px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div id="pre">
+    <div class="mark">STREAM QODE</div>
+    <div class="num" id="preNum">0</div>
+    <div class="line"><i id="preBar"></i></div>
+  </div>
+  <div id="cur"></div>
+  <div id="app"></div>
+  <div class="grain"></div>
+
+<script>
+  const SRC = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"; // stand-in; prod = each product's Cloudflare .m3u8
+  const items = [
+    { name: "Nocturne", k: "Maison Aurelia · Horlogerie", meta: "Limited to 25 · €142,000", pos:"g0", tint:"linear-gradient(160deg,rgba(120,90,20,.42),transparent)", w:500, h:640 },
+    { name: "Éclat", k: "Maison Aurelia · High Jewellery", meta: "One of one · Price on request", pos:"g1", tint:"linear-gradient(160deg,rgba(150,40,60,.42),transparent)", w:430, h:560 },
+    { name: "Meridian", k: "Maison Aurelia · Motion", meta: "Coachbuilt Grand Tourer · €345,000", pos:"g2", tint:"linear-gradient(160deg,rgba(40,90,140,.42),transparent)", w:640, h:580 },
+    { name: "Atelier 01", k: "Maison Aurelia · Atelier", meta: "Couture · By appointment", pos:"g3", tint:"linear-gradient(160deg,rgba(60,120,90,.42),transparent)", w:450, h:660 },
+    { name: "Solstice", k: "Maison Aurelia · Estates", meta: "Private residence, Como · POA", pos:"g4", tint:"linear-gradient(160deg,rgba(120,90,20,.42),transparent)", w:560, h:600 },
+  ];
+  const posters = {
+    g0:"radial-gradient(120% 90% at 70% 20%,#6b4e12,transparent 55%),linear-gradient(150deg,#0c0a06,#1b1408)",
+    g1:"radial-gradient(120% 90% at 25% 25%,#7a1f33,transparent 55%),linear-gradient(150deg,#100608,#2a0c14)",
+    g2:"radial-gradient(120% 90% at 75% 30%,#244a6b,transparent 55%),linear-gradient(150deg,#06090c,#0f2033)",
+    g3:"radial-gradient(120% 90% at 30% 25%,#1c5a41,transparent 55%),linear-gradient(150deg,#050a08,#0c2419)",
+    g4:"radial-gradient(120% 90% at 70% 25%,#5a3a1c,transparent 55%),linear-gradient(150deg,#0a0705,#241708)",
+  };
+
+  // One-at-a-time HLS video virtualization, reused by both engines.
+  function attach(node) {
+    if (node.__on) return; node.__on = true;
+    const v = node.querySelector(".vid");
+    if (window.Hls && Hls.isSupported()) { const h = new Hls({ maxBufferLength: 6 }); h.loadSource(SRC); h.attachMedia(v); node.__hls = h; }
+    else { v.src = SRC; }
+    v.play().catch(() => {});
+  }
+  function detach(node) {
+    if (!node.__on) return; node.__on = false;
+    const v = node.querySelector(".vid"); v.pause();
+    if (node.__hls) { node.__hls.destroy(); node.__hls = null; } v.removeAttribute("src");
+  }
+  const mediaHTML = (it) =>
+    `<div class="poster" style="background:${posters[it.pos]}"></div>` +
+    `<video class="vid" muted loop playsinline preload="none"></video>` +
+    `<div class="tint" style="background:${it.tint}"></div><div class="vig"></div>` +
+    `<div class="live"><i></i>Live video</div>`;
+
+  const isTouch = matchMedia("(pointer: coarse)").matches || innerWidth < 820;
+  document.body.classList.add(isTouch ? "touch" : "desktop");
+
+  /* ================= DESKTOP ================= */
+  function buildDesktop(app) {
+    app.innerHTML =
+      '<div class="stage"><div class="wash"></div><div id="ghosts"></div><div id="cards"></div></div>' +
+      '<div class="hud"><div class="wm">STREAM QODE</div><div class="clk" id="clk"></div>' +
+      '<div class="nv">COLLECTION / ATELIER</div><div class="ix" id="ix">01 / 05</div>' +
+      '<div class="ht">DRAG / SCROLL →</div></div><div class="bar" id="bar"></div>';
+    const cardsEl = app.querySelector("#cards"), ghostsEl = app.querySelector("#ghosts");
+    const H = () => innerHeight, W = () => innerWidth;
+    let x = 360; const cards = [];
+    items.forEach((it, i) => {
+      const el = document.createElement("div"); el.className = "card";
+      const yoff = [-0.06,0.08,-0.02,0.05,-0.04][i] * H();
+      el.style.width = it.w+"px"; el.style.height = it.h+"px";
+      el.dataset.basex = x; el.dataset.yoff = yoff;
+      el.innerHTML = mediaHTML(it) + `<div class="cap"><div class="k">${it.k}</div><h2>${it.name}</h2><p>${it.meta}</p></div>`;
+      cardsEl.appendChild(el); cards.push(el); x += it.w + 240;
+    });
+    const sceneW = x;
+    ["aurelia","maison","2026"].forEach((w, i) => {
+      const g = document.createElement("div"); g.className = "ghost"; g.textContent = w;
+      g.dataset.basex = 120 + i*1900; g.dataset.speed = .55; ghostsEl.appendChild(g);
+    });
+    let target = 0, cur = 0, index = 0, playing = -1;
+    const maxX = () => Math.max(0, sceneW - W() + 360);
+    const clamp = (v) => Math.max(0, Math.min(maxX(), v));
+    function loop() {
+      cur += (target - cur) * 0.075; if (Math.abs(target-cur) < .3) cur = target;
+      app.querySelector(".wash").style.transform = `translate3d(${-cur*.25}px,0,0)`;
+      app.querySelectorAll(".ghost").forEach(g => g.style.transform =
+        `translate3d(${parseFloat(g.dataset.basex) - cur*parseFloat(g.dataset.speed)}px,-50%,0)`);
+      let near = 0, best = 1e9;
+      cards.forEach((el, i) => {
+        const sx = parseFloat(el.dataset.basex) - cur, c = sx + el.offsetWidth/2, d = Math.abs(c - W()/2);
+        const t = Math.max(0, 1 - d/(W()*.62));
+        el.style.transform = `translate3d(${sx}px,calc(-50% + ${el.dataset.yoff}px),0) scale(${.9+t*.1})`;
+        el.style.opacity = (.3 + t*.7).toFixed(3);
+        el.classList.toggle("play", t > .72);
+        if (d < best) { best = d; near = i; }
+      });
+      if (near !== playing) { if (playing >= 0) detach(cards[playing]); attach(cards[near]); playing = near; }
+      if (near !== index) { index = near; app.querySelector("#ix").textContent =
+        String(index+1).padStart(2,"0")+" / "+String(items.length).padStart(2,"0"); }
+      app.querySelector("#bar").style.width = (cur/(maxX()||1)*100)+"%";
+      requestAnimationFrame(loop);
+    }
+    addEventListener("wheel", (e) => { e.preventDefault();
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; target = clamp(target + d*1.1); }, { passive:false });
+    let down=false, sx=0, st=0;
+    addEventListener("pointerdown", (e)=>{ down=true; sx=e.clientX; st=target; });
+    addEventListener("pointermove", (e)=>{ if(down) target = clamp(st-(e.clientX-sx)*1.5); });
+    addEventListener("pointerup", ()=> down=false);
+    addEventListener("keydown", (e)=>{ if(e.key==="ArrowRight") target=clamp(target+W()*.6); if(e.key==="ArrowLeft") target=clamp(target-W()*.6); });
+    setInterval(()=> app.querySelector("#clk").textContent =
+      "COMO · "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})+" CET", 1000);
+    app.querySelector("#clk").textContent = "COMO · "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})+" CET";
+    // custom cursor
+    const cur2 = document.getElementById("cur"); let cx=0, cy=0, tx=0, ty=0;
+    addEventListener("pointermove", (e)=>{ tx=e.clientX; ty=e.clientY; });
+    (function c(){ cx+=(tx-cx)*.2; cy+=(ty-cy)*.2; cur2.style.transform=`translate(${cx}px,${cy}px) translate(-50%,-50%)`; requestAnimationFrame(c); })();
+    cardsEl.addEventListener("pointerover", (e)=>{ if(e.target.closest(".card")) cur2.classList.add("big"); });
+    cardsEl.addEventListener("pointerout", ()=> cur2.classList.remove("big"));
+    requestAnimationFrame(loop);
+  }
+
+  /* ================= MOBILE ================= */
+  function buildMobile(app) {
+    app.innerHTML = '<div class="feed" id="feed"></div><div class="mdots" id="mdots"></div>';
+    const feed = app.querySelector("#feed"), dots = app.querySelector("#mdots"), slides = [];
+    items.forEach((it, i) => {
+      const s = document.createElement("section"); s.className = "slide";
+      s.innerHTML = mediaHTML(it) +
+        `<div class="mtop"><span>STREAM QODE</span><span>${String(i+1).padStart(2,"0")}/${String(items.length).padStart(2,"0")}</span></div>` +
+        `<div class="info"><div class="k">${it.k}</div><h2>${it.name}</h2><p>${it.meta}</p><div class="cta">Enquire</div></div>` +
+        `<div class="rail"><div><div class="ic">♡</div>Save</div><div><div class="ic">✎</div>Enquire</div><div><div class="ic">↗</div>Share</div></div>`;
+      feed.appendChild(s); slides.push(s);
+      const d = document.createElement("span"); if (i===0) d.className="on"; dots.appendChild(d);
+    });
+    const io = new IntersectionObserver((es) => es.forEach((e) => {
+      const i = slides.indexOf(e.target);
+      if (e.isIntersecting && e.intersectionRatio > .6) { attach(e.target); e.target.classList.add("on");
+        [...dots.children].forEach((d,j)=> d.classList.toggle("on", j===i)); }
+      else { detach(e.target); e.target.classList.remove("on"); }
+    }, { root: feed, threshold: [0,.6,1] });
+    slides.forEach(s => io.observe(s));
+  }
+
+  // Preloader, then build the right engine.
+  const app = document.getElementById("app");
+  let p = 0;
+  const t = setInterval(() => {
+    p = Math.min(100, p + Math.random()*18);
+    document.getElementById("preNum").textContent = Math.round(p);
+    document.getElementById("preBar").style.width = p + "%";
+    if (p >= 100) {
+      clearInterval(t);
+      (isTouch ? buildMobile : buildDesktop)(app);
+      setTimeout(() => document.getElementById("pre").classList.add("done"), 250);
+    }
+  }, 130);
+</script>
+</body>
+</html>
