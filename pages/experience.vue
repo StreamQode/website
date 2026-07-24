@@ -1,29 +1,19 @@
 <script setup lang="ts">
-// Fixed full-screen horizontal glide — each product is a full-bleed video panel;
-// wheel/drag glides directly between them with GSAP quickTo (crisp, fast, snaps to a
-// full screen). No pinned scroll, no Lenis float — direct control for responsiveness.
-// HLS video virtualized to the active panel. SSR renders markup; GSAP/HLS on mount.
+// Full-screen cinematic, modelled on firstframe.fr / electrafilmworks.com:
+// colour full-bleed video, confident type, brutal restraint, an elegant chrome bar
+// (counter · title · Prev/Next). Transitions are discrete crossfades on wheel / drag /
+// arrows (crisp, not slow scroll). HLS virtualized to the active scene.
 import { ref, onMounted, onBeforeUnmount } from "vue";
 
-interface Item { name: string; k: string; meta: string; poster: string; tint: string; }
-const SRC = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"; // stand-in; prod = each product's Cloudflare .m3u8
+interface Item { name: string; cat: string; meta: string; poster: string; }
+const SRC = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"; // stand-in; prod = each product's colour-graded Cloudflare .m3u8
 
 const items: Item[] = [
-  { name: "Nocturne", k: "Maison Aurelia · Horlogerie", meta: "Limited to 25 — €142,000",
-    poster: "radial-gradient(120% 90% at 70% 25%,#6b4e12,transparent 55%),linear-gradient(150deg,#0c0a06,#1b1408)",
-    tint: "linear-gradient(120deg,rgba(120,90,20,.4),rgba(20,14,6,.2))" },
-  { name: "Éclat", k: "Maison Aurelia · High Jewellery", meta: "One of one — Price on request",
-    poster: "radial-gradient(120% 90% at 30% 25%,#7a1f33,transparent 55%),linear-gradient(150deg,#100608,#2a0c14)",
-    tint: "linear-gradient(120deg,rgba(150,40,60,.4),rgba(20,6,10,.2))" },
-  { name: "Meridian", k: "Maison Aurelia · Motion", meta: "Coachbuilt Grand Tourer — €345,000",
-    poster: "radial-gradient(120% 90% at 72% 30%,#244a6b,transparent 55%),linear-gradient(150deg,#06090c,#0f2033)",
-    tint: "linear-gradient(120deg,rgba(40,90,140,.4),rgba(6,10,16,.2))" },
-  { name: "Atelier 01", k: "Maison Aurelia · Atelier", meta: "Couture — By appointment",
-    poster: "radial-gradient(120% 90% at 30% 25%,#1c5a41,transparent 55%),linear-gradient(150deg,#050a08,#0c2419)",
-    tint: "linear-gradient(120deg,rgba(30,120,90,.4),rgba(4,10,7,.2))" },
-  { name: "Solstice", k: "Maison Aurelia · Estates", meta: "Private residence, Como — POA",
-    poster: "radial-gradient(120% 90% at 70% 25%,#5a3a1c,transparent 55%),linear-gradient(150deg,#0a0705,#241708)",
-    tint: "linear-gradient(120deg,rgba(120,90,20,.4),rgba(12,8,4,.2))" },
+  { name: "Nocturne", cat: "Horlogerie", meta: "Maison Aurelia — €142,000", poster: "linear-gradient(160deg,#161009,#070502)" },
+  { name: "Éclat", cat: "High Jewellery", meta: "Maison Aurelia — Price on request", poster: "linear-gradient(160deg,#180a0e,#070203)" },
+  { name: "Meridian", cat: "Grand Tourer", meta: "Maison Aurelia — €345,000", poster: "linear-gradient(160deg,#0a121a,#02060a)" },
+  { name: "Atelier 01", cat: "Couture", meta: "Maison Aurelia — By appointment", poster: "linear-gradient(160deg,#0a140f,#020604)" },
+  { name: "Solstice", cat: "Private Estate", meta: "Maison Aurelia — Como, POA", poster: "linear-gradient(160deg,#140f08,#060402)" },
 ];
 const N = items.length;
 
@@ -32,95 +22,89 @@ useHead({
   link: [
     { rel: "preconnect", href: "https://fonts.googleapis.com" },
     { rel: "preconnect", href: "https://fonts.gstatic.com", crossorigin: "" },
-    { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;1,500;1,600&family=Inter:wght@300;400;500&display=swap" },
+    { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" },
   ],
 });
 
 const stage = ref<HTMLElement | null>(null);
-const track = ref<HTMLElement | null>(null);
 const active = ref(0);
-const progress = ref(0);
 
-let gsapRef: any, tickFn: any, onWheel: any, onDown: any, onMove: any, onUp: any, onKey: any;
+let gsapRef: any, onWheel: any, onDown: any, onMove: any, onUp: any, onKey: any, goFn: any;
 const hlsMap = new Map<number, any>();
+let current = 0, busy = false;
 
 onMounted(async () => {
   const gsap = (await import("gsap")).default;
   const Hls = (await import("hls.js")).default;
   gsapRef = gsap;
 
-  const panels = Array.from(track.value!.querySelectorAll<HTMLElement>(".panel"));
-  const vids = panels.map((p) => p.querySelector<HTMLVideoElement>(".vid")!);
-  const conts = panels.map((p) => p.querySelector<HTMLElement>(".content")!);
-  const vw = () => window.innerWidth;
-  const maxX = () => (N - 1) * vw();
-  const clamp = (v: number) => Math.max(0, Math.min(maxX(), v));
+  const scenes = Array.from(stage.value!.querySelectorAll<HTMLElement>(".scene"));
+  const vids = scenes.map((s) => s.querySelector<HTMLVideoElement>(".vid")!);
 
-  // Crisp, fast interpolation of the track's x toward target.
-  const xTo = gsap.quickTo(track.value, "x", { duration: 0.55, ease: "power3" });
-  let target = 0;
-
-  function manage(k: number) {
-    hlsMap.forEach((h, key) => {
-      if (key !== k) { if (h?.destroy) h.destroy(); vids[key].pause(); vids[key].removeAttribute("src"); panels[key].classList.remove("play"); hlsMap.delete(key); }
-    });
-    if (hlsMap.has(k)) return;
+  function play(k: number) {
+    if (hlsMap.has(k)) { vids[k].play().catch(() => {}); return; }
     const v = vids[k]; let h = null;
     if (Hls.isSupported()) { h = new Hls({ maxBufferLength: 6 }); h.loadSource(SRC); h.attachMedia(v); }
     else { v.src = SRC; }
     v.play().catch(() => {});
-    panels[k].classList.add("play");
     hlsMap.set(k, h);
   }
+  function drop(k: number) {
+    const h = hlsMap.get(k); if (h?.destroy) h.destroy();
+    vids[k].pause(); vids[k].removeAttribute("src"); hlsMap.delete(k);
+  }
 
-  // Per-frame: read the animated x, update active panel + subtle content parallax.
-  tickFn = () => {
-    const cur = Number(gsap.getProperty(track.value, "x")) || 0; // ≤ 0
-    progress.value = -cur / (maxX() || 1);
-    let near = 0, best = 1e9;
-    panels.forEach((p, i) => {
-      const left = i * vw() + cur; // panel's left edge vs viewport
-      const t = Math.max(0, 1 - Math.abs(left) / (vw() * 0.9));
-      const c = conts[i];
-      c.style.opacity = (0.12 + t * 0.88).toFixed(3);
-      c.style.transform = `translateX(${left * -0.05}px)`;
-      const d = Math.abs(left);
-      if (d < best) { best = d; near = i; }
-    });
-    if (near !== active.value) { active.value = near; manage(near); }
-  };
-  gsap.ticker.add(tickFn);
+  function go(dir: number) {
+    if (busy) return;
+    const to = (current + dir + N) % N;
+    if (to === current) return;
+    busy = true;
+    const from = current; current = to; active.value = to;
+    play(to);
+    gsap.set(scenes[to], { zIndex: 2 });
+    gsap.set(scenes[from], { zIndex: 1 });
+    gsap.fromTo(scenes[to], { opacity: 0 }, { opacity: 1, duration: 0.9, ease: "power2.inOut" });
+    // Title of the incoming scene rises in.
+    const title = scenes[to].querySelector(".title");
+    if (title) gsap.fromTo(title, { yPercent: 12, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.9, ease: "power3.out", delay: 0.1 });
+    gsap.to(scenes[from], { opacity: 0, duration: 0.9, ease: "power2.inOut", onComplete: () => { drop(from); busy = false; } });
+  }
+  goFn = go;
 
-  let snapTimer: any;
-  const snap = () => { target = clamp(Math.round(target / vw()) * vw()); xTo(-target); };
-  const schedule = () => { clearTimeout(snapTimer); snapTimer = setTimeout(snap, 130); };
-
+  // Wheel / drag / keys → discrete step (debounced so one gesture = one move).
+  let wheelLock = false;
   onWheel = (e: WheelEvent) => {
     e.preventDefault();
+    if (wheelLock) return;
     const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    target = clamp(target + d * 1.35); xTo(-target); schedule();
+    if (Math.abs(d) < 8) return;
+    wheelLock = true; setTimeout(() => (wheelLock = false), 700);
+    go(d > 0 ? 1 : -1);
   };
-  let down = false, sx = 0, st = 0;
-  onDown = (e: PointerEvent) => { down = true; sx = e.clientX; st = target; };
-  onMove = (e: PointerEvent) => { if (down) { target = clamp(st - (e.clientX - sx) * 1.5); xTo(-target); } };
-  onUp = () => { if (down) { down = false; snap(); } };
-  onKey = (e: KeyboardEvent) => {
-    if (e.key === "ArrowRight") { target = clamp(Math.round(target / vw()) * vw() + vw()); xTo(-target); }
-    if (e.key === "ArrowLeft") { target = clamp(Math.round(target / vw()) * vw() - vw()); xTo(-target); }
+  let downX = 0, dragging = false;
+  onDown = (e: PointerEvent) => { dragging = true; downX = e.clientX; };
+  onMove = (e: PointerEvent) => {
+    if (!dragging) return;
+    const dx = e.clientX - downX;
+    if (Math.abs(dx) > 60) { dragging = false; go(dx < 0 ? 1 : -1); }
   };
+  onUp = () => { dragging = false; };
+  onKey = (e: KeyboardEvent) => { if (e.key === "ArrowRight") go(1); if (e.key === "ArrowLeft") go(-1); };
   addEventListener("wheel", onWheel, { passive: false });
   addEventListener("pointerdown", onDown);
   addEventListener("pointermove", onMove);
   addEventListener("pointerup", onUp);
   addEventListener("keydown", onKey);
 
-  manage(0);
+  play(0);
 });
+
+// Exposed to template chrome buttons.
+const step = (dir: number) => goFn && goFn(dir);
 
 onBeforeUnmount(() => {
   hlsMap.forEach((h) => h?.destroy && h.destroy());
   hlsMap.clear();
-  if (gsapRef && tickFn) gsapRef.ticker.remove(tickFn);
   removeEventListener("wheel", onWheel);
   removeEventListener("pointerdown", onDown);
   removeEventListener("pointermove", onMove);
@@ -132,70 +116,79 @@ onBeforeUnmount(() => {
 <template>
   <div class="exp">
     <div ref="stage" class="stage">
-      <div ref="track" class="track">
-        <section v-for="(it, i) in items" :key="i" class="panel">
-          <div class="poster" :style="{ background: it.poster }" />
-          <video class="vid" muted loop playsinline preload="none" />
-          <div class="tint" :style="{ background: it.tint }" />
-          <div class="vig" />
-          <div class="content">
-            <div class="k">{{ it.k }}</div>
-            <h1>{{ it.name }}</h1>
-            <p>{{ it.meta }}</p>
-            <button class="cta">Enquire</button>
-          </div>
-        </section>
+      <div v-for="(it, i) in items" :key="i" class="scene" :style="{ opacity: i === 0 ? 1 : 0, zIndex: i === 0 ? 2 : 1 }">
+        <div class="poster" :style="{ background: it.poster }" />
+        <video class="vid" muted loop playsinline preload="none" />
+        <div class="grad" />
+        <div class="hero">
+          <div class="cat">{{ it.cat }}</div>
+          <h1 class="title">{{ it.name }}</h1>
+          <div class="meta">{{ it.meta }}</div>
+        </div>
       </div>
 
-      <div class="hud">
-        <div class="wm">STREAM QODE</div>
-        <div class="nv">COLLECTION / ATELIER</div>
-        <div class="ix">{{ String(active + 1).padStart(2, "0") }} / {{ String(N).padStart(2, "0") }}</div>
-        <div class="ht">DRAG / SCROLL →</div>
+      <!-- Global chrome -->
+      <header class="top">
+        <span class="brand">STREAM QODE</span>
+        <nav class="nav"><span>Collection</span><span>Atelier</span><span>Contact</span></nav>
+      </header>
+
+      <div class="chrome">
+        <span class="count">{{ String(active + 1).padStart(2, "0") }} <i>/</i> {{ String(N).padStart(2, "0") }}</span>
+        <div class="ticks"><i v-for="(it, i) in items" :key="i" :class="{ on: i === active }" /></div>
+        <div class="arrows">
+          <button @click="step(-1)" aria-label="Previous">Prev</button>
+          <button @click="step(1)" aria-label="Next">Next</button>
+        </div>
       </div>
-      <div class="bar" :style="{ width: progress * 100 + '%' }" />
     </div>
   </div>
 </template>
 
 <style>
-html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #08070a; color: #f2ede4; }
+html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #050403; color: #f4f1ea; }
 * { box-sizing: border-box; }
-.exp { font-family: "Inter", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.exp { font-family: "Archivo", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 
 .stage { position: fixed; inset: 0; overflow: hidden; cursor: grab; }
 .stage:active { cursor: grabbing; }
-.track { display: flex; height: 100vh; height: 100dvh; will-change: transform; }
 
-.panel { position: relative; flex: 0 0 100vw; height: 100vh; height: 100dvh; overflow: hidden; }
-.panel .poster { position: absolute; inset: -4%; background-size: cover; background-position: center;
-  animation: kb 24s ease-in-out infinite alternate; }
-.panel .vid { position: absolute; inset: -4%; width: 108%; height: 108%; object-fit: cover; opacity: 0;
-  transition: opacity 1s cubic-bezier(.22,1,.36,1); filter: saturate(.85) contrast(1.04) brightness(.68);
-  animation: kb 24s ease-in-out infinite alternate; }
-.panel.play .vid { opacity: 1; }
-@keyframes kb { from { transform: scale(1.03) translate(-1%,-.5%); } to { transform: scale(1.12) translate(1%,1%); } }
-.panel .tint { position: absolute; inset: 0; mix-blend-mode: overlay; }
-.panel .vig { position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(0,0,0,.32), transparent 28%, transparent 52%, rgba(0,0,0,.72)); }
+.scene { position: absolute; inset: 0; will-change: opacity; }
+.scene .poster { position: absolute; inset: 0; background-size: cover; }
+.scene .vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: contrast(1.03) saturate(1.04); }
+.scene .grad { position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,.4) 0%, transparent 22%, transparent 45%, rgba(0,0,0,.78) 100%); }
 
-.content { position: absolute; left: clamp(24px,7vw,120px); right: clamp(24px,7vw,120px); bottom: 17vh; color: #fff; will-change: transform, opacity; }
-.content .k { font-size: 11px; letter-spacing: .3em; text-transform: uppercase; opacity: .85; margin-bottom: 20px; }
-.content h1 { font-family: "Playfair Display", serif; font-style: italic; font-weight: 600;
-  font-size: clamp(56px,9vw,140px); line-height: .9; letter-spacing: -.01em; }
-.content p { margin-top: 22px; font-size: 15px; letter-spacing: .04em; opacity: .85; }
-.content .cta { margin-top: 30px; background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.65);
-  padding: 14px 30px; border-radius: 40px; font-size: 11px; letter-spacing: .22em; text-transform: uppercase; cursor: pointer;
-  transition: .4s cubic-bezier(.22,1,.36,1); }
-.content .cta:hover { background: #fff; color: #0c0a08; }
+/* Confident, restrained type — bottom-left, like the film studios. */
+.hero { position: absolute; left: clamp(24px,6vw,90px); bottom: clamp(90px,16vh,150px); right: clamp(24px,6vw,90px); }
+.hero .cat { font-size: 12px; font-weight: 500; letter-spacing: .35em; text-transform: uppercase; opacity: .75; margin-bottom: 18px; }
+.hero .title { margin: 0; font-weight: 600; text-transform: uppercase; letter-spacing: -.01em;
+  font-size: clamp(52px,8vw,120px); line-height: .92; }
+.hero .meta { margin-top: 20px; font-size: 13px; font-weight: 400; letter-spacing: .06em; opacity: .82; }
 
-.hud { position: fixed; inset: 0; pointer-events: none; z-index: 40; mix-blend-mode: difference; color: #fff; }
-.hud > * { position: absolute; }
-.wm { top: 30px; left: 34px; font-size: 13px; letter-spacing: .2em; }
-.nv { top: 30px; right: 34px; font-size: 12px; letter-spacing: .16em; }
-.ix { bottom: 28px; right: 34px; font-family: "Playfair Display", serif; font-style: italic; font-size: 15px; }
-.ht { bottom: 30px; left: 34px; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; opacity: .7; }
-.bar { position: fixed; left: 0; bottom: 0; height: 2px; background: #c8a24a; z-index: 41; }
+.top { position: fixed; top: 0; left: 0; right: 0; z-index: 30; display: flex; justify-content: space-between; align-items: center;
+  padding: 26px clamp(24px,6vw,90px); }
+.top .brand { font-size: 13px; font-weight: 600; letter-spacing: .22em; }
+.top .nav { display: flex; gap: 34px; }
+.top .nav span { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; opacity: .8; cursor: pointer; transition: .3s; }
+.top .nav span:hover { opacity: 1; }
 
-@media (max-width: 600px) { .content { bottom: 14vh; } .content .k { letter-spacing: .22em; } }
+.chrome { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between;
+  padding: 24px clamp(24px,6vw,90px); pointer-events: none; }
+.chrome > * { pointer-events: auto; }
+.count { font-size: 13px; letter-spacing: .14em; }
+.count i { font-style: normal; opacity: .5; margin: 0 4px; }
+.ticks { display: flex; gap: 8px; }
+.ticks i { width: 26px; height: 2px; background: rgba(255,255,255,.28); transition: .4s cubic-bezier(.22,1,.36,1); }
+.ticks i.on { background: #f4f1ea; }
+.arrows { display: flex; gap: 26px; }
+.arrows button { background: none; border: 0; color: inherit; font-family: inherit; font-size: 12px; letter-spacing: .16em;
+  text-transform: uppercase; opacity: .8; cursor: pointer; transition: .3s; padding: 0; }
+.arrows button:hover { opacity: 1; }
+
+@media (max-width: 640px) {
+  .top .nav { display: none; }
+  .hero { bottom: 110px; }
+  .ticks { display: none; }
+}
 </style>
