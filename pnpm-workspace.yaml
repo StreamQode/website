@@ -1,0 +1,5 @@
+# pnpm settings (moved here from package.json's "pnpm" field in pnpm 10+).
+# Allow esbuild's install script to run so it fetches its native binary —
+# Nuxt/Vite need it. Applies locally and on Vercel.
+allowBuilds:
+  esbuild: true

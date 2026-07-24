@@ -1,0 +1,5 @@
+{
+  // Nuxt generates the real tsconfig into .nuxt on `nuxt prepare` (runs postinstall);
+  // this just extends it so editors get types.
+  "extends": "./.nuxt/tsconfig.json"
+}
