@@ -86,9 +86,9 @@
   .bar { position: fixed; left: 0; bottom: 0; height: 2px; background: #c8a24a; width: 0; z-index: 46; }
 
   /* ---------- MOBILE: vertical feed ---------- */
-  .feed { height: 100%; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none; }
+  .feed { height: 100vh; height: 100dvh; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
   .feed::-webkit-scrollbar { display: none; }
-  .slide { position: relative; height: 100%; scroll-snap-align: start; overflow: hidden; color: #fff; }
+  .slide { position: relative; height: 100vh; height: 100dvh; scroll-snap-align: start; overflow: hidden; color: #fff; }
   .slide .poster { inset: 0; }
   .slide .info { position: absolute; left: 22px; right: 80px; bottom: 42px; }
   .slide .info .k { font-size: 11px; letter-spacing: .2em; text-transform: uppercase; opacity: .85; margin-bottom: 12px; }
@@ -153,7 +153,10 @@
     `<div class="tint" style="background:${it.tint}"></div><div class="vig"></div>` +
     `<div class="live"><i></i>Live video</div>`;
 
-  const isTouch = matchMedia("(pointer: coarse)").matches || innerWidth < 820;
+  const coarse = matchMedia("(pointer: coarse)").matches;
+  const hasTouch = navigator.maxTouchPoints > 0 || "ontouchstart" in window;
+  const narrow = Math.min(window.innerWidth || 9999, window.screen.width || 9999) < 820;
+  const isTouch = coarse || hasTouch || narrow;
   document.body.classList.add(isTouch ? "touch" : "desktop");
 
   /* ================= DESKTOP ================= */
