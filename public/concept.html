@@ -239,7 +239,7 @@
       if (e.isIntersecting && e.intersectionRatio > .6) { attach(e.target); e.target.classList.add("on");
         [...dots.children].forEach((d,j)=> d.classList.toggle("on", j===i)); }
       else { detach(e.target); e.target.classList.remove("on"); }
-    }, { root: feed, threshold: [0,.6,1] });
+    }), { root: feed, threshold: [0,.6,1] });
     slides.forEach(s => io.observe(s));
   }
 
