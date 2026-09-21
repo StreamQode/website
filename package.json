@@ -1,5 +1,6 @@
 {
   "name": "streamqode-website",
+  "packageManager": "pnpm@12.5.1",
   "private": true,
   "type": "module",
   "description": "StreamQode public showroom — Nuxt 3 (SSR) on Vercel. Reads the public API.",
@@ -11,11 +12,15 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
-    "nuxt": "^3.13.0",
-    "vue": "^3.5.0",
-    "vue-router": "^4.4.0",
     "gsap": "^3.12.5",
+    "hls.js": "^1.5.13",
     "lenis": "^1.1.14",
-    "hls.js": "^1.5.13"
+    "nuxt": "^3.21.10",
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.3.11"
   }
 }

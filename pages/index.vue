@@ -1,8 +1,5 @@
 <script setup lang="ts">
-// The showroom skeleton — SSR fetch of the public API, rendered as real HTML.
-// The kinetic canvas / mobile feed (see apps/showroom concepts in the platform repo)
-// layer on top of this data later. Tenant is fixed to defaultTenant for now; the
-// host→tenant resolve (ADR 0006) replaces that with a lookup of the request Host.
+// The showroom resolves the request hostname to a site and loads its projection.
 interface Media {
   kind: string; // "image" | "video"
   id: string;
@@ -10,34 +7,30 @@ interface Media {
 }
 interface Product {
   id: string;
-  title: string;
-  body: string;
+  name: string;
+  description?: string | null;
   media: Media[];
-  created_at: string;
 }
 interface ShowroomResponse {
-  tenant_id: string;
-  products: Product[];
+  host: string;
+  siteId: string;
+  region: "uks" | "uae";
+  items: Product[];
 }
 
-const config = useRuntimeConfig();
-const tenant = config.public.defaultTenant;
+// The Nuxt server calls the public regional resolver. Browser requests remain
+// same-origin, and the Vercel deployment never contains a fixed tenant ID.
+const { data, error } = await useFetch<ShowroomResponse>("/api/catalogue");
 
-// useFetch runs on the server during SSR (server→server, so no CORS in play) and
-// hydrates on the client.
-const { data, error } = await useFetch<ShowroomResponse>(
-  () => `${config.public.apiBase}/v1/public/${tenant}/products`,
-);
-
-const products = computed(() => data.value?.products ?? []);
+const products = computed(() => data.value?.items ?? []);
 
 const firstImage = (p: Product) =>
-  p.media?.find((m) => m.kind === "image")?.url ?? null;
+  (Array.isArray(p.media) ? p.media : []).find((m) => m.kind === "image")?.url ?? null;
 
 useHead({
-  title: `${tenant} — Showroom`,
+  title: "Showroom",
   meta: [
-    { property: "og:title", content: `${tenant} — Showroom` },
+    { property: "og:title", content: "Showroom" },
     { property: "og:type", content: "website" },
   ],
 });
@@ -47,7 +40,7 @@ useHead({
   <main class="wrap">
     <header class="head">
       <h1>Showroom</h1>
-      <span class="tenant">{{ tenant }}</span>
+      <span v-if="data?.host" class="tenant">{{ data.host }}</span>
     </header>
 
     <p v-if="error" class="state">Couldn’t load the showroom right now.</p>
@@ -61,13 +54,13 @@ useHead({
           <img
             v-if="firstImage(p)"
             :src="firstImage(p)!"
-            :alt="p.title"
+            :alt="p.name"
             loading="lazy"
           />
           <div v-else class="ph" />
         </div>
-        <h2>{{ p.title }}</h2>
-        <p class="body">{{ p.body }}</p>
+        <h2>{{ p.name }}</h2>
+        <p class="body">{{ p.description }}</p>
       </article>
     </section>
   </main>

@@ -35,7 +35,9 @@ let current = 0, busy = false;
 
 onMounted(async () => {
   const gsap = (await import("gsap")).default;
-  const Hls = (await import("hls.js")).default;
+  // The light build contains the playback features used here and omits subtitle,
+  // alternate-audio, CMCD and EME controllers from the client bundle.
+  const Hls = (await import("hls.js/dist/hls.light.mjs")).default;
   gsapRef = gsap;
 
   const scenes = Array.from(stage.value!.querySelectorAll<HTMLElement>(".scene"));
